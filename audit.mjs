@@ -1086,13 +1086,38 @@ const RULES = [
     description: 'Keep input responsive by deferring heavy derived filtering/mapping.',
     custom: (content) => {
       if (!isClientComponent(content)) return [];
-      const hasInput = /<input|onChange=/.test(content);
+      
+      const hasInput = /<input|onChange=|<Textarea|onValueChange=/.test(content);
       const hasFiltering = /\.filter\(|\.map\(/.test(content);
       const hasDeferredValue = /useDeferredValue/.test(content);
+      const hasDebounce = /debounce|useDebounce/.test(content);
       
-      if (hasInput && hasFiltering && !hasDeferredValue && content.length > 2000) {
-        return singleIssue(1, 'Input-driven filtering in large component; consider useDeferredValue.');
+      if (!hasInput || !hasFiltering || hasDeferredValue || hasDebounce) return [];
+
+      // Check for actual reactive filtering/mapping
+      // 1. Identify state variable from input
+      const stateMatch = content.match(/const\s*\[\s*(\w+)\s*,\s*set\s*\w+\s*\]\s*=\s*useState/i);
+      if (stateMatch) {
+        const stateVar = stateMatch[1];
+        // 2. Check if this stateVar is used in a .filter or .map call
+        // AND check that it's NOT inside a function starting with handle or on (event handlers)
+        const reactiveFilterIndex = content.search(new RegExp(`\\.filter\\(\\s*\\w+\\s*=>.*${stateVar}.*\\)|\\.map\\(\\s*\\w+\\s*=>.*${stateVar}.*\\)`));
+        
+        if (reactiveFilterIndex !== -1) {
+          // Check if the match is inside an event handler
+          const beforeMatch = content.slice(0, reactiveFilterIndex);
+          const isInsideEventHandler = /\b(?:handle|on)[A-Z]\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{[^}]*$/.test(beforeMatch);
+          
+          if (isInsideEventHandler) return [];
+
+          // 3. Exclude common static/config mappings if file isn't massive
+          const configMapping = /\.map\(\s*(?:field|option|column|layout|item\s*=>\s*item\.(?:id|label|value))/i.test(content);
+          if (configMapping && content.length < 8000) return [];
+          
+          return singleIssue(1, 'Input-driven filtering in large component; consider useDeferredValue.');
+        }
       }
+
       return [];
     },
   },
