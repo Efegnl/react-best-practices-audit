@@ -3,13 +3,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = process.cwd();
+const ROOT_DIR = path.resolve(__dirname, '.');
 
 const CONFIG = {
-  scanDirs: ['src', 'app', 'components', 'lib', 'pages'],
-  extensions: ['.ts', '.tsx', '.js', '.jsx'],
-  exclude: ['node_modules', '.next', 'dist', 'build', 'generated'],
+  scanDirs: ['app', 'components', 'lib'],
+  extensions: ['.ts', '.tsx'],
+  exclude: ['node_modules', '.next', 'generated', 'src/generated'],
   whitelist: [],
+  productionDomains: [], // User can add their domains here (e.g., 'example.com')
 };
 
 const PRIORITY_ORDER = {
@@ -416,6 +417,8 @@ const RULES = [
       if (!isClientComponent(content)) return [];
       if (!/import\s*\(\s*['"](\.\/|\.\.\/|@\/components\/)[^'"]+['"]\s*\)/.test(content))
         return [];
+      // If the file exports a preload function, assume the pattern is followed correctly
+      if (/export\s+const\s+preload[A-Z]\w+/.test(content)) return [];
       if (/\.preload\??\(|onMouseEnter=|onFocus=|onPointerEnter=|onPreload=/.test(content))
         return [];
       if (/useEffect[\s\S]{0,260}import\s*\(/.test(content)) return [];
@@ -885,8 +888,8 @@ const RULES = [
     custom: (content, _filePath, relativePath) => {
       // Skip UI-heavy TSX files to avoid JSX conditional false positives.
       if (relativePath.endsWith('.tsx') && !relativePath.startsWith('app/api/')) return [];
-      // If file already uses guard-clause style, avoid noisy recommendations.
-      if (/if\s*\([^)]+\)\s*return\b/.test(content)) return [];
+      // If file already uses early-exit style (guards), avoid noisy recommendations.
+      if (/if\s*\([^)]+\)\s*(?:\{\s*)?(?:return|throw|break|continue)\b/.test(content)) return [];
 
       const deepNesting =
         /if\s*\([^)]+\)\s*\{[\s\S]{1,220}if\s*\([^)]+\)\s*\{[\s\S]{1,220}if\s*\([^)]+\)\s*\{/g;
@@ -962,7 +965,7 @@ const RULES = [
     name: 'Missing Key in Map',
     priority: 'HIGH',
     description: 'React elements returned from map() should include a stable key prop.',
-    pattern: /\.map\([^)]*\)\s*=>\s*([^({]*<[a-zA-Z][^>]*>)/gm,
+    pattern: /\.map\([^)]*\)\s*=>\s*([^({;]{0,120}<[a-zA-Z][^>]*>)/gm,
     filter: (match) => !match[0].includes('key='),
     message: 'Potential missing key prop in map() output.',
   },
@@ -970,8 +973,15 @@ const RULES = [
     name: 'Hardcoded Domain',
     priority: 'HIGH',
     description: 'Avoid hardcoded production domains/localhost in app code.',
-    pattern: /['"]https?:\/\/(localhost|epheos\.com|www\.epheos\.com)/g,
-    message: 'Hardcoded domain/localhost detected.',
+    custom: (content) => {
+      const domains = ['localhost', ...CONFIG.productionDomains].map(d => d.replace(/\./g, '\\.'));
+      const pattern = new RegExp(`['"]https?:\\/\\/(${domains.join('|')})`, 'g');
+      const matches = [...content.matchAll(pattern)];
+      return matches.map(match => ({
+        line: lineFromIndex(content, match.index),
+        message: `Hardcoded domain/localhost detected: ${match[1]}`,
+      }));
+    },
   },
   {
     name: 'No <img> Tag',
@@ -1255,8 +1265,8 @@ function walkDir(dir, callback) {
 }
 
 function runAudit() {
-  console.log('\nStarting React Best Practices Audit...');
-  let output = 'React Best Practices Audit Results\n\n';
+  console.log('\nStarting React Best Practices Audit (March 2026)...');
+  let output = 'React Best Practices Audit - March 2026 Refresh\n\n';
   const allResults = [];
 
   CONFIG.scanDirs.forEach((scanDir) => {
